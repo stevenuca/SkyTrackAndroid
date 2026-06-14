@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+    <meta name="theme-color" content="#07111f">
+    <title>SkyTrack 航空雷達</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <svg class="svg-defs" aria-hidden="true">
+        <symbol id="icon-search" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="6.5"></circle>
+            <path d="m16 16 4 4"></path>
+        </symbol>
+        <symbol id="icon-radar" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="8"></circle>
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M12 4v8l6 4"></path>
+        </symbol>
+        <symbol id="icon-heart" viewBox="0 0 24 24">
+            <path d="M20.8 5.8a5.1 5.1 0 0 0-7.2 0L12 7.4l-1.6-1.6a5.1 5.1 0 0 0-7.2 7.2L12 21l8.8-8a5.1 5.1 0 0 0 0-7.2Z"></path>
+        </symbol>
+        <symbol id="icon-close" viewBox="0 0 24 24">
+            <path d="m6 6 12 12M18 6 6 18"></path>
+        </symbol>
+        <symbol id="icon-refresh" viewBox="0 0 24 24">
+            <path d="M20 7v5h-5"></path>
+            <path d="M18.5 16A8 8 0 1 1 19 8l1 4"></path>
+        </symbol>
+        <symbol id="icon-location" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="3"></circle>
+            <circle cx="12" cy="12" r="8"></circle>
+            <path d="M12 2v2M12 20v2M2 12h2M20 12h2"></path>
+        </symbol>
+        <symbol id="icon-arrow" viewBox="0 0 24 24">
+            <path d="m9 18 6-6-6-6"></path>
+        </symbol>
+    </svg>
+
+    <main class="app-shell">
+        <section id="map-screen" class="screen active" aria-label="即時航班地圖">
+            <div id="map" class="map">
+                <div id="tile-layer" class="tile-layer"></div>
+                <div id="marker-layer" class="marker-layer"></div>
+                <div class="map-shade"></div>
+            </div>
+
+            <header class="top-panel">
+                <div class="brand-row">
+                    <div class="brand">
+                        <span class="brand-mark">
+                            <svg><use href="#icon-radar"></use></svg>
+                        </span>
+                        <span>
+                            <strong>SkyTrack</strong>
+                            <small>即時航空雷達</small>
+                        </span>
+                    </div>
+                    <div id="live-pill" class="live-pill">
+                        <span></span> 即時
+                    </div>
+                </div>
+                <form id="search-form" class="search-box">
+                    <svg><use href="#icon-search"></use></svg>
+                    <input id="search-input" autocomplete="off" enterkeyhint="search"
+                        placeholder="搜尋航班代號或 ICAO24">
+                    <button id="search-clear" type="button" class="icon-button hidden" aria-label="清除搜尋">
+                        <svg><use href="#icon-close"></use></svg>
+                    </button>
+                </form>
+            </header>
+
+            <div class="map-actions">
+                <button id="locate-user" class="round-button" aria-label="定位到我的位置">
+                    <svg><use href="#icon-location"></use></svg>
+                </button>
+                <button id="zoom-in" class="round-button" aria-label="放大">+</button>
+                <button id="zoom-out" class="round-button" aria-label="縮小">−</button>
+                <button id="refresh" class="round-button accent" aria-label="重新整理">
+                    <svg><use href="#icon-refresh"></use></svg>
+                </button>
+            </div>
+
+            <div class="map-meta">
+                <span id="flight-count">等待航班資料</span>
+                <span id="updated-at">--:--</span>
+            </div>
+
+            <a class="attribution" href="https://www.openstreetmap.org/copyright">
+                © OpenStreetMap 貢獻者
+            </a>
+
+            <section id="search-panel" class="floating-panel search-panel hidden">
+                <div class="panel-heading">
+                    <div>
+                        <small>搜尋結果</small>
+                        <h2 id="search-title">航班</h2>
+                    </div>
+                    <span id="search-count" class="count-badge">0</span>
+                </div>
+                <div id="search-results" class="result-list"></div>
+            </section>
+        </section>
+
+        <section id="watch-screen" class="screen watch-screen" aria-label="追蹤清單">
+            <header class="watch-header">
+                <small>我的航班</small>
+                <h1>追蹤清單</h1>
+                <p>快速查看你關注的航班最新狀態</p>
+            </header>
+            <div id="watch-list" class="watch-list"></div>
+            <div id="watch-empty" class="empty-state">
+                <span class="empty-icon">
+                    <svg><use href="#icon-heart"></use></svg>
+                </span>
+                <h2>還沒有追蹤航班</h2>
+                <p>在地圖點選飛機，再按「加入追蹤」即可收藏。</p>
+                <button id="empty-map-button" class="primary-button">前往即時地圖</button>
+            </div>
+        </section>
+
+        <nav class="bottom-nav" aria-label="主要導覽">
+            <button class="nav-item active" data-screen="map">
+                <svg><use href="#icon-radar"></use></svg>
+                <span>即時地圖</span>
+            </button>
+            <button class="nav-item" data-screen="watch">
+                <span class="nav-icon-wrap">
+                    <svg><use href="#icon-heart"></use></svg>
+                    <i id="watch-badge" class="nav-badge hidden">0</i>
+                </span>
+                <span>追蹤清單</span>
+            </button>
+        </nav>
+    </main>
+
+    <div id="scrim" class="scrim hidden"></div>
+    <aside id="detail-sheet" class="detail-sheet" aria-hidden="true">
+        <div class="sheet-handle"></div>
+        <div class="detail-top">
+            <div class="detail-flight">
+                <span id="detail-plane" class="detail-plane"></span>
+                <div>
+                    <small id="detail-country">來源國家</small>
+                    <h2 id="detail-callsign">--</h2>
+                    <p id="detail-icao">ICAO24 --</p>
+                </div>
+            </div>
+            <button id="detail-close" class="icon-button sheet-close" aria-label="關閉">
+                <svg><use href="#icon-close"></use></svg>
+            </button>
+        </div>
+        <div id="detail-status" class="status-chip">飛行中</div>
+        <div class="metric-grid">
+            <div class="metric-card">
+                <small>高度</small>
+                <strong id="detail-altitude">--</strong>
+                <span>英尺</span>
+            </div>
+            <div class="metric-card">
+                <small>地速</small>
+                <strong id="detail-speed">--</strong>
+                <span>節</span>
+            </div>
+            <div class="metric-card">
+                <small>航向</small>
+                <strong id="detail-heading">--</strong>
+                <span>度</span>
+            </div>
+            <div class="metric-card">
+                <small>垂直速率</small>
+                <strong id="detail-vertical">--</strong>
+                <span>呎/分</span>
+            </div>
+        </div>
+        <div class="detail-list">
+            <div><span>機型分類</span><strong id="detail-category">--</strong></div>
+            <div><span>應答機代碼</span><strong id="detail-squawk">--</strong></div>
+            <div><span>座標</span><strong id="detail-coordinates">--</strong></div>
+            <div><span>最後更新</span><strong id="detail-contact">--</strong></div>
+        </div>
+        <button id="track-button" class="track-button">
+            <svg><use href="#icon-heart"></use></svg>
+            <span>加入追蹤</span>
+        </button>
+        <p class="data-note">即時位置來自 OpenSky Network ADS-B 資料，可能有延遲或缺漏。</p>
+    </aside>
+
+    <div id="toast" class="toast hidden"></div>
+    <script src="app.js"></script>
+</body>
+</html>
