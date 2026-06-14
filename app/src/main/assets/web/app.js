@@ -27,9 +27,13 @@
         userLocation: null,
         locationRequestId: null,
         refreshTimer: null,
+        animationTimer: null,
+        refreshInterval: 10000,
         moveTimer: null,
         tileElements: new Map(),
-        pointer: null,
+        pointers: new Map(),
+        gesture: null,
+        detailRequestId: null,
         moved: false
     };
 
@@ -138,6 +142,7 @@
                     tile = new Image();
                     tile.className = "tile";
                     tile.alt = "";
+                    tile.draggable = false;
                     tile.decoding = "async";
                     tile.src = `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`;
                     tileLayer.appendChild(tile);
@@ -164,7 +169,8 @@
 
         for (const flight of state.flights) {
             if (flight.latitude == null || flight.longitude == null) continue;
-            const point = project(flight.latitude, flight.longitude);
+            const position = estimateFlightPosition(flight);
+            const point = project(position.latitude, position.longitude);
             const left = point.x - center.x + width / 2;
             const top = point.y - center.y + height / 2;
             if (left < -25 || top < -25 || left > width + 25 || top > height + 25) continue;
@@ -185,6 +191,33 @@
             markerLayer.appendChild(marker);
         }
         renderUserLocation(center, width, height);
+    }
+
+    function estimateFlightPosition(flight) {
+        if (flight.onGround
+            || flight.velocity == null
+            || flight.heading == null
+            || !flight.timePosition) {
+            return { latitude: flight.latitude, longitude: flight.longitude };
+        }
+        const elapsed = clamp(Date.now() / 1000 - flight.timePosition, 0, 25);
+        const distance = flight.velocity * elapsed;
+        const angularDistance = distance / 6371000;
+        const bearing = flight.heading * Math.PI / 180;
+        const latitude = flight.latitude * Math.PI / 180;
+        const longitude = flight.longitude * Math.PI / 180;
+        const estimatedLatitude = Math.asin(
+            Math.sin(latitude) * Math.cos(angularDistance)
+            + Math.cos(latitude) * Math.sin(angularDistance) * Math.cos(bearing)
+        );
+        const estimatedLongitude = longitude + Math.atan2(
+            Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latitude),
+            Math.cos(angularDistance) - Math.sin(latitude) * Math.sin(estimatedLatitude)
+        );
+        return {
+            latitude: estimatedLatitude * 180 / Math.PI,
+            longitude: estimatedLongitude * 180 / Math.PI
+        };
     }
 
     function renderUserLocation(center, width, height) {
@@ -291,14 +324,16 @@
                 state.flights = incoming;
                 renderMap();
                 $("#flight-count").textContent = `${incoming.length} 架航機`;
-                $("#updated-at").textContent = formatClock(payload.time ? payload.time * 1000 : Date.now());
                 hideSearchResults();
             }
             renderWatchList();
             if (remaining >= 0) {
                 $("#flight-count").title = `OpenSky 剩餘額度：${remaining}`;
+                state.refreshInterval = remaining <= 20 ? 60000 : remaining <= 100 ? 30000 : 10000;
             }
-            scheduleRefresh();
+            $("#updated-at").textContent =
+                `${formatClock(payload.time ? payload.time * 1000 : Date.now())} · ${state.refreshInterval / 1000}秒`;
+            scheduleRefresh(state.refreshInterval);
         } catch (error) {
             receiveError(requestId, "航班資料格式錯誤", -1, 0);
         }
@@ -355,6 +390,7 @@
 
     function openDetail(flight) {
         state.selected = flight;
+        resetExtendedDetail();
         $("#detail-callsign").textContent = displayCallsign(flight);
         $("#detail-country").textContent = displayCountry(flight.country);
         $("#detail-icao").textContent = `ICAO24 ${flight.icao24.toUpperCase()}`;
@@ -375,6 +411,75 @@
         detailSheet.classList.add("open");
         detailSheet.setAttribute("aria-hidden", "false");
         scrim.classList.remove("hidden");
+        requestFlightDetails(flight);
+    }
+
+    function resetExtendedDetail() {
+        $("#detail-departure").textContent = "--";
+        $("#detail-arrival").textContent = "--";
+        $("#detail-departure-time").textContent = "正在取得詳細資料";
+        $("#detail-arrival-time").textContent = "正在取得詳細資料";
+        $("#detail-flight-number").textContent = "--";
+        $("#detail-aircraft").textContent = "--";
+        $("#detail-gate").textContent = "--";
+        $("#detail-delay").textContent = "--";
+    }
+
+    function requestFlightDetails(flight) {
+        state.detailRequestId = `detail-${flight.icao24}-${Date.now()}`;
+        if (window.SkyTrackAndroid
+            && typeof window.SkyTrackAndroid.requestFlightDetails === "function") {
+            window.SkyTrackAndroid.requestFlightDetails(
+                state.detailRequestId,
+                flight.icao24,
+                flight.callsign
+            );
+            return;
+        }
+        receiveFlightDetailError(state.detailRequestId, "瀏覽器預覽無法查詢 AirLabs");
+    }
+
+    function receiveFlightDetails(requestId, rawJson) {
+        if (requestId !== state.detailRequestId || !state.selected) return;
+        try {
+            const payload = JSON.parse(rawJson);
+            const live = payload.live || {};
+            const schedule = payload.schedule || {};
+            const departure = schedule.dep_iata || live.dep_iata || schedule.dep_icao || live.dep_icao;
+            const arrival = schedule.arr_iata || live.arr_iata || schedule.arr_icao || live.arr_icao;
+            $("#detail-departure").textContent = departure || "--";
+            $("#detail-arrival").textContent = arrival || "--";
+            $("#detail-departure-time").textContent = formatFlightTime(
+                schedule.dep_actual || schedule.dep_estimated || schedule.dep_time
+            );
+            $("#detail-arrival-time").textContent = formatFlightTime(
+                schedule.arr_actual || schedule.arr_estimated || schedule.arr_time
+            );
+            $("#detail-flight-number").textContent =
+                live.flight_iata || schedule.flight_iata || live.flight_icao
+                || schedule.flight_icao || displayCallsign(state.selected);
+            $("#detail-aircraft").textContent = joinValues(
+                live.aircraft_icao || schedule.aircraft_icao,
+                live.reg_number
+            );
+            $("#detail-gate").textContent = formatGate(schedule);
+            const delay = Math.max(
+                Number(schedule.dep_delayed || 0),
+                Number(schedule.arr_delayed || 0)
+            );
+            $("#detail-delay").textContent = delay > 0 ? `${delay} 分鐘` : "目前無延誤資訊";
+            const status = translateFlightStatus(live.status || schedule.status);
+            if (status) $("#detail-status").textContent = status;
+        } catch (_) {
+            receiveFlightDetailError(requestId, "詳細資料格式錯誤");
+        }
+    }
+
+    function receiveFlightDetailError(requestId, message) {
+        if (requestId !== state.detailRequestId) return;
+        $("#detail-departure-time").textContent = "暫無資料";
+        $("#detail-arrival-time").textContent = "暫無資料";
+        $("#detail-flight-number").textContent = message;
     }
 
     function closeDetail() {
@@ -382,6 +487,7 @@
         detailSheet.setAttribute("aria-hidden", "true");
         scrim.classList.add("hidden");
         state.selected = null;
+        state.detailRequestId = null;
     }
 
     function toggleTracked() {
@@ -449,7 +555,7 @@
         }
     }
 
-    function scheduleRefresh(delay = 60000) {
+    function scheduleRefresh(delay = state.refreshInterval) {
         window.clearTimeout(state.refreshTimer);
         if (!state.active) return;
         state.refreshTimer = window.setTimeout(() => requestFlights(), delay);
@@ -459,9 +565,25 @@
         state.active = active;
         if (active) {
             scheduleRefresh(1000);
+            startAnimation();
         } else {
             window.clearTimeout(state.refreshTimer);
+            stopAnimation();
         }
+    }
+
+    function startAnimation() {
+        stopAnimation();
+        state.animationTimer = window.setInterval(() => {
+            if (state.active && $("#map-screen").classList.contains("active")) {
+                renderMarkers();
+            }
+        }, 1000);
+    }
+
+    function stopAnimation() {
+        window.clearInterval(state.animationTimer);
+        state.animationTimer = null;
     }
 
     function setLiveState(mode) {
@@ -614,6 +736,34 @@
         return `${Math.round(seconds / 60)} 分鐘前`;
     }
 
+    function formatFlightTime(value) {
+        if (!value) return "暫無時間";
+        const text = String(value);
+        return text.length >= 16 ? text.slice(5, 16).replace("-", "/") : text;
+    }
+
+    function formatGate(schedule) {
+        const departure = joinValues(schedule.dep_terminal, schedule.dep_gate);
+        const arrival = joinValues(schedule.arr_terminal, schedule.arr_gate);
+        if (departure === "--" && arrival === "--") return "--";
+        return `出發 ${departure}／抵達 ${arrival}`;
+    }
+
+    function joinValues(first, second) {
+        const values = [first, second].filter((value) => value != null && String(value).trim());
+        return values.length ? values.join(" · ") : "--";
+    }
+
+    function translateFlightStatus(status) {
+        return ({
+            "scheduled": "預定",
+            "en-route": "飛行中",
+            "active": "飛行中",
+            "landed": "已抵達",
+            "cancelled": "已取消"
+        })[status] || "";
+    }
+
     function getVerticalStatus(rate) {
         if (rate == null || Math.abs(rate) < 0.5) return "平飛中";
         return rate > 0 ? "爬升中" : "下降中";
@@ -642,35 +792,107 @@
         ];
     }
 
+    function pointerMidpoint() {
+        const values = [...state.pointers.values()];
+        if (values.length < 2) return null;
+        return {
+            x: (values[0].x + values[1].x) / 2,
+            y: (values[0].y + values[1].y) / 2
+        };
+    }
+
+    function pointerDistance() {
+        const values = [...state.pointers.values()];
+        if (values.length < 2) return 0;
+        return Math.hypot(values[0].x - values[1].x, values[0].y - values[1].y);
+    }
+
+    function geoAtScreenPoint(point, zoom = state.zoom) {
+        const center = project(state.center.lat, state.center.lon, zoom);
+        return unproject(
+            center.x + point.x - mapEl.clientWidth / 2,
+            center.y + point.y - mapEl.clientHeight / 2,
+            zoom
+        );
+    }
+
     mapEl.addEventListener("pointerdown", (event) => {
         if (event.target.closest(".plane-marker")) return;
         mapEl.setPointerCapture(event.pointerId);
-        state.pointer = {
-            id: event.pointerId,
-            x: event.clientX,
-            y: event.clientY,
-            center: project(state.center.lat, state.center.lon)
-        };
+        state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (state.pointers.size === 1) {
+            state.gesture = {
+                type: "drag",
+                x: event.clientX,
+                y: event.clientY,
+                center: project(state.center.lat, state.center.lon)
+            };
+        } else if (state.pointers.size === 2) {
+            const midpoint = pointerMidpoint();
+            state.gesture = {
+                type: "pinch",
+                startDistance: pointerDistance(),
+                startZoom: state.zoom,
+                anchor: geoAtScreenPoint(midpoint)
+            };
+        }
         state.moved = false;
     });
 
     mapEl.addEventListener("pointermove", (event) => {
-        if (!state.pointer || state.pointer.id !== event.pointerId) return;
-        const dx = event.clientX - state.pointer.x;
-        const dy = event.clientY - state.pointer.y;
-        if (Math.abs(dx) + Math.abs(dy) > 3) state.moved = true;
-        state.center = unproject(state.pointer.center.x - dx, state.pointer.center.y - dy);
+        if (!state.pointers.has(event.pointerId) || !state.gesture) return;
+        state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (state.gesture.type === "pinch" && state.pointers.size >= 2) {
+            const distance = Math.max(pointerDistance(), 1);
+            const targetZoom = clamp(
+                Math.round(state.gesture.startZoom + Math.log2(distance / state.gesture.startDistance)),
+                3,
+                13
+            );
+            const midpoint = pointerMidpoint();
+            const anchorWorld = project(
+                state.gesture.anchor.lat,
+                state.gesture.anchor.lon,
+                targetZoom
+            );
+            state.zoom = targetZoom;
+            state.center = unproject(
+                anchorWorld.x - midpoint.x + mapEl.clientWidth / 2,
+                anchorWorld.y - midpoint.y + mapEl.clientHeight / 2,
+                targetZoom
+            );
+            state.moved = true;
+        } else if (state.gesture.type === "drag" && state.pointers.size === 1) {
+            const dx = event.clientX - state.gesture.x;
+            const dy = event.clientY - state.gesture.y;
+            if (Math.abs(dx) + Math.abs(dy) > 3) state.moved = true;
+            state.center = unproject(state.gesture.center.x - dx, state.gesture.center.y - dy);
+        }
         state.center.lat = clamp(state.center.lat, -84, 84);
         state.center.lon = clamp(state.center.lon, -180, 180);
         renderMap();
     });
 
     function finishMove(event) {
-        if (!state.pointer || state.pointer.id !== event.pointerId) return;
-        state.pointer = null;
-        if (state.moved) {
+        if (!state.pointers.has(event.pointerId)) return;
+        state.pointers.delete(event.pointerId);
+        if (state.pointers.size === 1) {
+            const remaining = [...state.pointers.values()][0];
+            state.gesture = {
+                type: "drag",
+                x: remaining.x,
+                y: remaining.y,
+                center: project(state.center.lat, state.center.lon)
+            };
+        } else if (state.pointers.size === 0) {
+            state.gesture = null;
+        }
+        if (state.moved && state.pointers.size === 0) {
             window.clearTimeout(state.moveTimer);
-            state.moveTimer = window.setTimeout(() => requestFlights(), 900);
+            state.tileElements.forEach((tile) => tile.remove());
+            state.tileElements.clear();
+            renderMap();
+            state.moveTimer = window.setTimeout(() => requestFlights(), 700);
         }
     }
 
@@ -730,11 +952,14 @@
         receiveError,
         receiveCurrentLocation,
         receiveLocationError,
+        receiveFlightDetails,
+        receiveFlightDetailError,
         setActive,
         handleBack
     };
 
     renderMap();
     renderWatchList();
+    startAnimation();
     window.setTimeout(() => requestFlights(), 350);
 })();

@@ -152,6 +152,19 @@
             </button>
         </div>
         <div id="detail-status" class="status-chip">飛行中</div>
+        <section id="route-card" class="route-card">
+            <div class="route-airport">
+                <small>出發</small>
+                <strong id="detail-departure">--</strong>
+                <span id="detail-departure-time">等待詳細資料</span>
+            </div>
+            <div class="route-line"><span>✈</span></div>
+            <div class="route-airport align-right">
+                <small>抵達</small>
+                <strong id="detail-arrival">--</strong>
+                <span id="detail-arrival-time">等待詳細資料</span>
+            </div>
+        </section>
         <div class="metric-grid">
             <div class="metric-card">
                 <small>高度</small>
@@ -175,6 +188,10 @@
             </div>
         </div>
         <div class="detail-list">
+            <div><span>航空公司／航班</span><strong id="detail-flight-number">--</strong></div>
+            <div><span>機型／註冊編號</span><strong id="detail-aircraft">--</strong></div>
+            <div><span>航廈／登機門</span><strong id="detail-gate">--</strong></div>
+            <div><span>延誤</span><strong id="detail-delay">--</strong></div>
             <div><span>機型分類</span><strong id="detail-category">--</strong></div>
             <div><span>應答機代碼</span><strong id="detail-squawk">--</strong></div>
             <div><span>座標</span><strong id="detail-coordinates">--</strong></div>
