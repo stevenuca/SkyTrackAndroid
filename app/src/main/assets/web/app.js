@@ -120,22 +120,24 @@
     }
 
     function renderTiles() {
-        const zoom = state.zoom;
-        const count = Math.pow(2, zoom);
+        const tileZoom = Math.floor(state.zoom);
+        const tileScale = Math.pow(2, state.zoom - tileZoom);
+        const tileSize = 256 * tileScale;
+        const count = Math.pow(2, tileZoom);
         const center = project(state.center.lat, state.center.lon);
         const left = center.x - mapEl.clientWidth / 2;
         const top = center.y - mapEl.clientHeight / 2;
-        const firstX = Math.floor(left / 256);
-        const lastX = Math.floor((left + mapEl.clientWidth) / 256);
-        const firstY = Math.floor(top / 256);
-        const lastY = Math.floor((top + mapEl.clientHeight) / 256);
+        const firstX = Math.floor(left / tileSize);
+        const lastX = Math.floor((left + mapEl.clientWidth) / tileSize);
+        const firstY = Math.floor(top / tileSize);
+        const lastY = Math.floor((top + mapEl.clientHeight) / tileSize);
         const visible = new Set();
 
         for (let x = firstX; x <= lastX; x += 1) {
             for (let y = firstY; y <= lastY; y += 1) {
                 if (y < 0 || y >= count) continue;
                 const wrappedX = ((x % count) + count) % count;
-                const key = `${zoom}/${wrappedX}/${y}/${x}`;
+                const key = `${tileZoom}/${wrappedX}/${y}/${x}`;
                 visible.add(key);
                 let tile = state.tileElements.get(key);
                 if (!tile) {
@@ -144,12 +146,14 @@
                     tile.alt = "";
                     tile.draggable = false;
                     tile.decoding = "async";
-                    tile.src = `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`;
+                    tile.src = `https://tile.openstreetmap.org/${tileZoom}/${wrappedX}/${y}.png`;
                     tileLayer.appendChild(tile);
                     state.tileElements.set(key, tile);
                 }
-                tile.style.left = `${x * 256 - left}px`;
-                tile.style.top = `${y * 256 - top}px`;
+                tile.style.width = `${tileSize + 0.5}px`;
+                tile.style.height = `${tileSize + 0.5}px`;
+                tile.style.left = `${x * tileSize - left}px`;
+                tile.style.top = `${y * tileSize - top}px`;
             }
         }
 
@@ -845,7 +849,7 @@
         if (state.gesture.type === "pinch" && state.pointers.size >= 2) {
             const distance = Math.max(pointerDistance(), 1);
             const targetZoom = clamp(
-                Math.round(state.gesture.startZoom + Math.log2(distance / state.gesture.startDistance)),
+                state.gesture.startZoom + Math.log2(distance / state.gesture.startDistance),
                 3,
                 13
             );
